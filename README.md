@@ -13,8 +13,10 @@ The application consists of two types of process both written in Go.
 - ### Client
 	On a different terminal session (possible to run multiple clients at the same time):
 	`cd client`
+	\
 	`go run .`
-	Start typing the commands like `login asd`, `send qwe "hello world"`
+	\
+	This will spawn a custom CLI. Now start typing the commands like `login asd`, `send qwe "hello world"`
 
 ## Testing
 Tests are written for the server only.
