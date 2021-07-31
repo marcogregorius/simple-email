@@ -93,6 +93,6 @@ func writeToServer(conn net.Conn, str string) error {
 	if res, err = bufio.NewReader(conn).ReadString('\n'); err != nil {
 		return err
 	}
-	fmt.Println(res)
+	fmt.Print(res)
 	return nil
 }
