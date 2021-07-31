@@ -19,10 +19,10 @@ The application consists of two types of process both written in Go.
 	This will spawn a custom CLI. Now start typing the commands like `login asd`, `send qwe "hello world"`
 
 ## Testing
-Tests are written for the server only.
-Run `go test .` inside `server/`directory.
-To test for race condition, `go test -race .`
-The application is tested for race condition, such as when multiple clients are send message to the same user at the same time.
+- Tests are written for the server only.
+- Run `go test .` inside `server/`directory.
+- To test for race condition, run `go test -race .`
+- The application is tested for race condition, such as when multiple clients are send message to the same user at the same time.
 
 ## Race Condition
 Since the data store is in memory, multiple goroutines (possibly threads) from multiple client requests could read/write the same variable at the same time. To prevent race condition, mutex is added to the necessary shared variables between goroutines (ie list of user messages).
