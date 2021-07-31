@@ -5,20 +5,100 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 )
 
-// store various data structures needed in memory
-var loggedInUsers map[string]bool       // set of logged in users
-var addrUser map[string]string          // map between client's address to user
-var userMessages map[string]*list.List  // map between user to list of messages
-var userCurrentRead map[string]*Message // map between user to current read message
+type safeUserMessages struct {
+	mu sync.Mutex
+	v  map[string]*list.List
+}
 
-func init() {
+func (u *safeUserMessages) GetMessages(user string) *list.List {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.v[user]
+}
+
+func (u *safeUserMessages) AddMessage(user string, m *Message) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.v[user] == nil {
+		u.v[user] = list.New()
+	}
+	u.v[user].PushBack(*m)
+}
+
+func (u *safeUserMessages) PopMessage(user string) Message {
+	// pop from front of list
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	l := u.v[user]
+	return l.Remove(l.Front()).(Message)
+}
+
+type safeLoggedInUsers struct {
+	mu sync.Mutex
+	v  map[string]bool
+}
+
+func (u *safeLoggedInUsers) Get(user string) bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.v[user]
+}
+
+func (u *safeLoggedInUsers) Add(user string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.v[user] = true
+}
+
+type safeAddrUser struct {
+	mu sync.Mutex
+	v  map[string]string
+}
+
+func (u *safeAddrUser) Get(addr string) string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.v[addr]
+}
+
+func (u *safeAddrUser) Set(addr, user string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.v[addr] = user
+}
+
+type safeUserCurrentRead struct {
+	mu sync.Mutex
+	v  map[string]*Message
+}
+
+func (u *safeUserCurrentRead) Get(user string) *Message {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.v[user]
+}
+
+func (u *safeUserCurrentRead) Set(user string, m *Message) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.v[user] = m
+}
+
+// store various data structures needed in memory
+var loggedInUsers safeLoggedInUsers     // set of logged in users
+var addrUser safeAddrUser               // map between client's address to user
+var userCurrentRead safeUserCurrentRead // map between user to current read message
+var userMessages safeUserMessages       // map between user to list of messages
+
+func Init() {
 	// initialize data structures needed
-	addrUser = make(map[string]string)
-	userMessages = make(map[string]*list.List)
-	loggedInUsers = make(map[string]bool)
-	userCurrentRead = make(map[string]*Message)
+	loggedInUsers = safeLoggedInUsers{v: make(map[string]bool)}
+	addrUser = safeAddrUser{v: make(map[string]string)}
+	userMessages = safeUserMessages{v: make(map[string]*list.List)}
+	userCurrentRead = safeUserCurrentRead{v: make(map[string]*Message)}
 }
 
 type Message struct {
@@ -31,15 +111,19 @@ func RunCommand(commandArr []string, addr string) (out string, err error) {
 	switch commandArr[0] {
 	case "login":
 		user := commandArr[1]
-		addrUser[addr] = user
-		loggedInUsers[user] = true
+
+		// store client's ip address as current logged in user
+		addrUser.Set(addr, user)
+		// add current user to the set of logged in users
+		loggedInUsers.Add(user)
+
 		out = fmt.Sprintf("Logged in as %v", user)
 
 	case "send":
 		recipient, msg := commandArr[1], strings.Join(commandArr[2:], " ")
 		// check if user is logged in from the IP address
-		sender := addrUser[addr]
-		if err = checkLogin(addrUser[addr]); err != nil {
+		sender := addrUser.Get(addr)
+		if err = checkLogin(sender); err != nil {
 			return
 		}
 		m := &Message{text: msg, sender: sender}
@@ -49,18 +133,18 @@ func RunCommand(commandArr []string, addr string) (out string, err error) {
 		out = "message sent"
 
 	case "read":
-		user := addrUser[addr]
+		user := addrUser.Get(addr)
 		if err = checkLogin(user); err != nil {
 			return
 		}
 
 		// check if there is any message to read
-		l := userMessages[user]
+		l := userMessages.GetMessages(user)
 		if l == nil || l.Len() == 0 {
 			out = "no message to read"
 			return
 		}
-		m := l.Remove(l.Front()).(Message)
+		m := userMessages.PopMessage(user)
 
 		sender := m.sender
 		if m.forwarder != nil {
@@ -68,18 +152,17 @@ func RunCommand(commandArr []string, addr string) (out string, err error) {
 		}
 
 		out = fmt.Sprintf("from %v: %v", sender, m.text)
-		userMessages[user] = l
 
 		// store current read message for use in reply and forward
-		userCurrentRead[user] = &m
+		userCurrentRead.Set(user, &m)
 
 	case "reply":
-		user := addrUser[addr]
+		user := addrUser.Get(addr)
 		if err = checkLogin(user); err != nil {
 			return
 		}
-		msg := commandArr[1]
-		readMsg := userCurrentRead[addrUser[addr]]
+		msg := strings.Join(commandArr[1:], " ")
+		readMsg := userCurrentRead.Get(addrUser.Get(addr))
 		if readMsg == nil {
 			out = "no current read message to reply."
 			return
@@ -93,11 +176,11 @@ func RunCommand(commandArr []string, addr string) (out string, err error) {
 
 	case "forward":
 		recipient := commandArr[1]
-		user := addrUser[addr]
+		user := addrUser.Get(addr)
 		if err = checkLogin(user); err != nil {
 			return
 		}
-		m := userCurrentRead[addrUser[addr]]
+		m := userCurrentRead.Get(addrUser.Get(addr))
 		if m == nil {
 			out = "no current read message to forward."
 			return
@@ -115,12 +198,12 @@ func RunCommand(commandArr []string, addr string) (out string, err error) {
 		out = fmt.Sprintf("message forwarded to %v", recipient)
 	case "broadcast":
 		msg := strings.Join(commandArr[1:], " ")
-		user := addrUser[addr]
+		user := addrUser.Get(addr)
 		if err = checkLogin(user); err != nil {
 			return
 		}
 		m := &Message{text: msg, sender: user}
-		for recipient, _ := range loggedInUsers {
+		for recipient, _ := range loggedInUsers.v {
 			fmt.Println(recipient)
 			if recipient != user {
 				go m.sendMessage(recipient)
@@ -131,6 +214,7 @@ func RunCommand(commandArr []string, addr string) (out string, err error) {
 	return
 }
 
+// start of helper functions
 func checkLogin(user string) (err error) {
 	if user == "" {
 		err = errors.New("error: please login first")
@@ -139,13 +223,10 @@ func checkLogin(user string) (err error) {
 }
 
 func (m *Message) sendMessage(recipient string) (err error) {
-	if loggedInUsers[recipient] == false {
+	if loggedInUsers.Get(recipient) == false {
 		err = errors.New(fmt.Sprintf("error: recipient %v not found / not logged in", recipient))
 		return
 	}
-	if userMessages[recipient] == nil {
-		userMessages[recipient] = list.New()
-	}
-	userMessages[recipient].PushBack(*m)
+	userMessages.AddMessage(recipient, m)
 	return
 }

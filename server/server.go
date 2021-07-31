@@ -20,11 +20,13 @@ func NewServer(addr string) Server {
 
 func (s *Server) Run() (err error) {
 	ln, err := net.Listen("tcp", s.addr)
-	log.Println("Server running at ", s.addr)
+	log.Println("Server running at ", ln.Addr())
 	if err != nil {
-		// handle error
+		log.Fatal(err)
 	}
 	defer ln.Close()
+
+	Init()
 
 	for {
 		conn, err := ln.Accept()
@@ -33,6 +35,7 @@ func (s *Server) Run() (err error) {
 		}
 		go handleConnection(conn)
 	}
+	return nil
 }
 
 func main() {
@@ -50,7 +53,7 @@ func handleConnection(conn net.Conn) {
 			if err != io.EOF {
 				fmt.Println(err)
 			}
-			log.Println("Closing connection")
+			log.Println("Closing client connection", addr)
 			conn.Close()
 			return
 		}
