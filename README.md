@@ -12,6 +12,7 @@ The application consists of two types of process both written in Go.
 	`go run .`
 - ### Client
 	On a different terminal session (possible to run multiple clients at the same time):
+	\
 	`cd client`
 	\
 	`go run .`
